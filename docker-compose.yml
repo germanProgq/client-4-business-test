@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: approval
+      POSTGRES_PASSWORD: approval
+      POSTGRES_DB: approval_service
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U approval -d approval_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      target: runtime
+    environment:
+      DATABASE_URL_SYNC: postgresql+psycopg2://approval:approval@db:5432/approval_service
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+
+  api:
+    build:
+      context: .
+      target: runtime
+    environment:
+      DATABASE_URL: postgresql+asyncpg://approval:approval@db:5432/approval_service
+      DATABASE_URL_SYNC: postgresql+psycopg2://approval:approval@db:5432/approval_service
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # `docker compose --profile test run --rm tests`
+  tests:
+    build:
+      context: .
+      target: test
+    profiles: ["test"]
+    command: ["pytest", "-v"]
+
+volumes:
+  pgdata:
