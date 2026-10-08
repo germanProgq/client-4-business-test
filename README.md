@@ -1,12 +1,15 @@
 # approval-service
 
-A backend service for content-approval workflows: create an approval request for a
-publication/scenario/edit/external item, route it to reviewers, and record a final
-Approve/Reject/Cancel decision with a full audit trail.
+A backend service for content-approval workflows. You create an approval request for a
+publication, scenario, edit, or external item, route it to reviewers, and record a final
+Approve, Reject, or Cancel decision with a full audit trail.
 
-Built with FastAPI (async), PostgreSQL + SQLAlchemy 2.0 + Alembic, and a stateless,
-horizontally-scalable design. See [DESIGN.md](DESIGN.md) for the data model, service
-boundaries, and the reasoning behind the concurrency/idempotency/eventing choices.
+This is a test task written for the clients4business interview. It is a self-contained
+exercise, not a production deployment.
+
+Built with FastAPI (async), PostgreSQL with SQLAlchemy 2.0 and Alembic, and a stateless,
+horizontally scalable design. See [DESIGN.md](DESIGN.md) for the data model, service
+boundaries, and the reasoning behind the concurrency, idempotency, and eventing choices.
 
 ## Contents
 
@@ -22,7 +25,7 @@ boundaries, and the reasoning behind the concurrency/idempotency/eventing choice
 
 ## Quickstart (Docker)
 
-Requires Docker + Docker Compose.
+Requires Docker and Docker Compose.
 
 ```bash
 docker compose up --build
@@ -32,8 +35,8 @@ This starts Postgres, runs `alembic upgrade head` via a one-shot `migrate` servi
 then starts the API on `http://localhost:8000`. Interactive API docs are at
 `http://localhost:8000/docs`.
 
-Run the test suite in a container (uses an isolated in-memory SQLite database, no Postgres
-required):
+Run the test suite in a container (uses an isolated in-memory SQLite database, so no
+Postgres is required):
 
 ```bash
 docker compose --profile test run --rm tests
@@ -59,44 +62,36 @@ uvicorn app.main:app --reload
 ## Auth model
 
 There is no real identity provider for this assignment, so the service uses an explicit
-**auth stub**: the caller (in production, an upstream gateway/BFF that has already
+auth stub. The caller (in production, an upstream gateway or BFF that has already
 verified a real session) sets three headers describing who is making the request and
-what it's allowed to do:
+what they are allowed to do:
 
 | Header                 | Meaning                                                      |
-|-------------------------|---------------------------------------------------------------|
-| `X-Workspace-Id`        | Tenant the request acts on behalf of                          |
-| `X-User-Id`             | Acting user (recorded as `createdBy`/`decidedBy` and in audit logs) |
-| `X-User-Permissions`    | Comma-separated permission scopes granted to this user        |
+|------------------------|--------------------------------------------------------------|
+| `X-Workspace-Id`       | Tenant the request acts on behalf of                         |
+| `X-User-Id`            | Acting user (recorded as `createdBy` / `decidedBy` and in audit logs) |
+| `X-User-Permissions`   | Comma-separated permission scopes granted to this user       |
 
-Recognized scopes: `approval:read`, `approval:create`, `approval:decide`, `approval:cancel`
-(`decide` covers both approve and reject). Missing `X-Workspace-Id`/`X-User-Id` → `401`;
-missing a required scope → `403`. The `workspace_id` in the URL path must match
-`X-Workspace-Id` exactly, or the request is rejected with `403` before any database
-lookup happens -- this is a second, independent layer of tenant-isolation enforcement on
+Recognized scopes: `approval:read`, `approval:create`, `approval:decide`,
+`approval:cancel` (`decide` covers both approve and reject). Missing `X-Workspace-Id` or
+`X-User-Id` returns `401`. A missing required scope returns `403`. The `workspace_id` in
+the URL path must match `X-Workspace-Id` exactly, or the request is rejected with `403`
+before any database lookup. That is a second, independent layer of tenant isolation on
 top of every query already filtering by workspace internally (see DESIGN.md).
 
 Swapping in real auth later only means replacing how these three values are derived
-(`app/core/auth.py`) -- everything downstream already consumes them as an opaque
-`AuthContext`.
+(`app/core/auth.py`). Everything downstream already consumes them as opaque inputs.
 
 ## API
 
-All resource endpoints are versioned under `/api/v1`. `sourceType` is one of
-`publication`, `scenario`, `edit`, `external`; `sourceId` and `reviewerUserIds` are
-opaque external ids from other services (never resolved or validated here, by design --
-see "Service boundaries" in DESIGN.md).
-
-| Method | Path                                                                 | Permission          |
-|--------|-----------------------------------------------------------------------|----------------------|
-| GET    | `/health`                                                             | none (liveness)      |
-| GET    | `/ready`                                                              | none (readiness, checks DB) |
-| POST   | `/api/v1/workspaces/{workspace_id}/approval-requests`                 | `approval:create`    |
-| GET    | `/api/v1/workspaces/{workspace_id}/approval-requests`                 | `approval:read`      |
-| GET    | `/api/v1/workspaces/{workspace_id}/approval-requests/{request_id}`    | `approval:read`      |
-| POST   | `/api/v1/workspaces/{workspace_id}/approval-requests/{request_id}/approve` | `approval:decide` |
-| POST   | `/api/v1/workspaces/{workspace_id}/approval-requests/{request_id}/reject`  | `approval:decide` |
-| POST   | `/api/v1/workspaces/{workspace_id}/approval-requests/{request_id}/cancel`  | `approval:cancel` |
+| Method | Path                                                                        | Scope             |
+|--------|-----------------------------------------------------------------------------|-------------------|
+| POST   | `/api/v1/workspaces/{workspace_id}/approval-requests`                       | `approval:create` |
+| GET    | `/api/v1/workspaces/{workspace_id}/approval-requests`                       | `approval:read`   |
+| GET    | `/api/v1/workspaces/{workspace_id}/approval-requests/{request_id}`          | `approval:read`   |
+| POST   | `/api/v1/workspaces/{workspace_id}/approval-requests/{request_id}/approve`  | `approval:decide` |
+| POST   | `/api/v1/workspaces/{workspace_id}/approval-requests/{request_id}/reject`   | `approval:decide` |
+| POST   | `/api/v1/workspaces/{workspace_id}/approval-requests/{request_id}/cancel`   | `approval:cancel` |
 
 ### Create a request
 
@@ -122,10 +117,10 @@ curl "http://localhost:8000/api/v1/workspaces/ws_1/approval-requests?status=pend
   -H "X-Workspace-Id: ws_1" -H "X-User-Id: usr_1" -H "X-User-Permissions: approval:read"
 ```
 
-Supports `status`, `sourceType`, `limit` (default 20, max 100) and `cursor` (opaque,
-returned as `nextCursor` -- pass it back to get the next page) query params.
+Supports `status`, `sourceType`, `limit` (default 20, max 100), and `cursor` (opaque,
+returned as `nextCursor`, pass it back to get the next page) query params.
 
-### Approve / reject / cancel
+### Approve, reject, cancel
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/workspaces/ws_1/approval-requests/<id>/approve \
@@ -141,22 +136,23 @@ curl -X POST http://localhost:8000/api/v1/workspaces/ws_1/approval-requests/<id>
   -H "Content-Type: application/json" -d '{"reason": "Draft was removed"}'
 ```
 
-A request already in a final state (`approved`/`rejected`/`cancelled`) cannot be decided
-again -- any further approve/reject/cancel call returns `409 invalid_state_transition`.
+A request already in a final state (`approved`, `rejected`, `cancelled`) cannot be
+decided again. Any further approve, reject, or cancel call returns
+`409 invalid_state_transition`.
 
 ## Idempotency
 
 Every mutating endpoint (create, approve, reject, cancel) accepts an optional
 `Idempotency-Key` header. Replaying the same key with the same request body returns the
 original response verbatim (same status code, no new record created or state re-applied).
-Reusing a key with a *different* body is rejected with `422 idempotency_key_reused`. Keys
+Reusing a key with a different body is rejected with `422 idempotency_key_reused`. Keys
 are scoped per workspace and per operation, so the same key value can be reused safely
 across different endpoints or different workspaces.
 
-Independent of idempotency keys, creating a second request for a `sourceType`+`sourceId`
-that already has one pending request fails with `409 duplicate_active_request` (the
-response includes `existingRequestId`) -- this guards against duplicate approvals piling
-up even when a client doesn't send a key at all.
+Independent of idempotency keys, creating a second request for a `sourceType` and
+`sourceId` that already has a pending request fails with `409 duplicate_active_request`
+(the response includes `existingRequestId`). This guards against duplicate approvals
+piling up even when a client does not send a key at all.
 
 ## Errors
 
@@ -166,17 +162,17 @@ All errors share one envelope:
 { "error": { "code": "invalid_state_transition", "message": "...", "details": { } } }
 ```
 
-| Status | `code`                       | When                                              |
-|--------|-------------------------------|----------------------------------------------------|
-| 400    | `bad_request`                 | Malformed pagination cursor                        |
-| 401    | `unauthenticated`             | Missing `X-Workspace-Id` / `X-User-Id`              |
-| 403    | `forbidden`                   | Missing permission scope, or path/header workspace mismatch |
-| 404    | `not_found`                   | Request doesn't exist in this workspace             |
-| 409    | `invalid_state_transition`    | Decision on a non-pending request, or lost a concurrent-decision race |
-| 409    | `duplicate_active_request`    | A pending request already exists for this source    |
-| 422    | `validation_error`            | Request body failed schema validation               |
-| 422    | `idempotency_key_reused`      | Same `Idempotency-Key`, different request body      |
-| 500    | `internal_error`               | Unexpected server error                             |
+| Status | `code`                     | When                                                        |
+|--------|----------------------------|-------------------------------------------------------------|
+| 400    | `bad_request`              | Malformed pagination cursor                                 |
+| 401    | `unauthenticated`          | Missing `X-Workspace-Id` or `X-User-Id`                     |
+| 403    | `forbidden`                | Missing permission scope, or path/header workspace mismatch |
+| 404    | `not_found`                | Request does not exist in this workspace                    |
+| 409    | `invalid_state_transition` | Decision on a non-pending request, or lost a concurrent-decision race |
+| 409    | `duplicate_active_request` | A pending request already exists for this source            |
+| 422    | `validation_error`         | Request body failed schema validation                       |
+| 422    | `idempotency_key_reused`   | Same `Idempotency-Key`, different request body              |
+| 500    | `internal_error`           | Unexpected server error                                     |
 
 ## Tests
 
@@ -185,31 +181,32 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Tests run against an isolated in-memory SQLite database per test (see `tests/conftest.py`)
-through the same FastAPI app used in production, so the full HTTP stack -- routing, auth,
-RBAC, validation, exception handling -- is exercised, not just the service layer.
+Tests run against an isolated in-memory SQLite database per test (see
+`tests/conftest.py`) through the same FastAPI app used in production, so the full HTTP
+stack (routing, auth, RBAC, validation, exception handling) is exercised, not just the
+service layer.
 
 ## Configuration
 
 Environment variables (see `.env.example`):
 
-| Variable                        | Default                                                        | Purpose |
-|----------------------------------|------------------------------------------------------------------|---------|
-| `DATABASE_URL`                   | `postgresql+asyncpg://approval:approval@localhost:5432/approval_service` | App runtime DSN (async) |
-| `DATABASE_URL_SYNC`               | derived from `DATABASE_URL`                                     | Alembic migration DSN (sync, psycopg2) |
-| `LOG_LEVEL`                       | `INFO`                                                            | Log verbosity |
-| `OUTBOX_POLL_INTERVAL_SECONDS`    | `2.0`                                                              | Outbox dispatcher poll interval |
+| Variable                       | Default                                                        | Purpose |
+|--------------------------------|----------------------------------------------------------------|---------|
+| `DATABASE_URL`                 | `postgresql+asyncpg://approval:approval@localhost:5432/approval_service` | App runtime DSN (async) |
+| `DATABASE_URL_SYNC`            | derived from `DATABASE_URL`                                     | Alembic migration DSN (sync, psycopg2) |
+| `LOG_LEVEL`                    | `INFO`                                                          | Log verbosity |
+| `OUTBOX_POLL_INTERVAL_SECONDS` | `2.0`                                                          | Outbox dispatcher poll interval |
 
 ## Project layout
 
 ```
 app/
-  api/            HTTP layer: routers, request/response wiring, DI
-  core/            Auth stub, RBAC, exceptions, redaction, pagination
-  db/              SQLAlchemy models, session/engine setup
-  schemas/         Pydantic request/response models
-  services/        Business logic: state machine, idempotency, audit, outbox/events
-  main.py          App factory, middleware, exception handlers
-alembic/           Database migrations
-tests/             pytest suite (SQLite-backed, full HTTP stack)
+  api/        HTTP layer: routers, request/response wiring, DI
+  core/       Auth stub, RBAC, exceptions, redaction, pagination
+  db/         SQLAlchemy models, session/engine setup
+  schemas/    Pydantic request/response models
+  services/   Business logic: state machine, idempotency, audit, outbox/events
+  main.py     App factory, middleware, exception handlers
+alembic/      Database migrations
+tests/        pytest suite (SQLite-backed, full HTTP stack)
 ```
